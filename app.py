@@ -135,7 +135,7 @@ def send_email_notification(node_id, status):
             Infrastructure integrity depends on rapid response. Every second counts. Our system will continue to monitor this node for escalation or recovery signals.</p>
 
             <blockquote style="color: #888; font-style: italic; border-left: 4px solid #555; padding-left: 15px;">
-                “The quiet before failure is never silence — it’s a whisper. This was that whisper.”
+                "The quiet before failure is never silence — it's a whisper. This was that whisper."
             </blockquote>
 
             <p style="text-align: right;">— End of transmission —</p>
@@ -254,10 +254,10 @@ def get_nodes():
     # Get all nodes with their most recent sensor data
     c.execute('''
     SELECT n.node_id, n.latitude, n.longitude, 
-           sd.tds, sd.ph, sd.humidity, sd.temp
+           sd.tds, sd.ph, sd.humidity, sd.temp, sd.status, sd.timestamp
     FROM nodes n
     LEFT JOIN (
-        SELECT s.node_id, s.tds, s.ph, s.humidity, s.temp,
+        SELECT s.node_id, s.tds, s.ph, s.humidity, s.temp, s.status, s.timestamp,
                MAX(s.timestamp) as latest_time
         FROM sensor_data s
         GROUP BY s.node_id

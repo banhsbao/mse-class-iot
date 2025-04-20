@@ -4,6 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>IoT Monitoring System</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -28,6 +36,21 @@
             width: 100%;
             margin-bottom: 20px;
         }
+        /* Leaflet custom styles */
+        .leaflet-tooltip {
+            background-color: rgba(255, 255, 255, 0.9);
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.4);
+            padding: 8px 12px;
+            font-size: 12px;
+            line-height: 1.5;
+            white-space: nowrap;
+        }
+        .leaflet-tooltip-top:before {
+            border-top-color: rgba(255, 255, 255, 0.9);
+        }
+        /* End Leaflet custom styles */
         .dashboard {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -106,20 +129,69 @@
             document.getElementById('enableDummyData').addEventListener('click', enableDummyData);
             document.getElementById('disableDummyData').addEventListener('click', disableDummyData);
             
+            // Initialize map
+            initMap();
+            
             // Load dashboard data immediately and then every 5 seconds
             loadDashboardData();
             setInterval(loadDashboardData, 5000);
         });
         
-        // Initialize Google Maps
+        // Initialize Leaflet Map
         function initMap() {
-            map = new google.maps.Map(document.getElementById('map'), {
-                center: { lat: 10.762622, lng: 106.660172 },
-                zoom: 12
-            });
+            // Create map centered at Ho Chi Minh City
+            map = L.map('map').setView([10.762622, 106.660172], 12);
+            
+            // Add OpenStreetMap tile layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
             
             // Load node data for the map
             loadNodeData();
+            
+            // Reload node data every 10 seconds to update markers
+            setInterval(loadNodeData, 10000);
+        }
+        
+        // Create marker icons based on status
+        function getMarkerIcon(status) {
+            // Default icon properties
+            const iconOptions = {
+                iconSize: [25, 41],
+                iconAnchor: [12, 41],
+                popupAnchor: [1, -34],
+                shadowSize: [41, 41]
+            };
+            
+            // Choose color based on status
+            switch (status) {
+                case 'GOOD':
+                    return L.icon({
+                        ...iconOptions,
+                        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+                        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png'
+                    });
+                case 'WARNING':
+                    return L.icon({
+                        ...iconOptions,
+                        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-yellow.png',
+                        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png'
+                    });
+                case 'BAD':
+                    return L.icon({
+                        ...iconOptions,
+                        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png'
+                    });
+                default:
+                    // Default blue for unknown status
+                    return L.icon({
+                        ...iconOptions,
+                        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
+                        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png'
+                    });
+            }
         }
         
         // Load node data for the map
@@ -136,23 +208,39 @@
         function updateMap(nodes) {
             nodes.forEach(node => {
                 if (node.latitude && node.longitude) {
-                    const position = { lat: node.latitude, lng: node.longitude };
+                    // Create tooltip content with node information
+                    const tooltipContent = `
+                        <strong>${node.node_id}</strong><br>
+                        Status: <span class="${getStatusClass(node.status)}">${node.status || 'Unknown'}</span><br>
+                        Temperature: ${node.temp ? node.temp.toFixed(1) + '°C' : 'N/A'}<br>
+                        Humidity: ${node.humidity ? node.humidity.toFixed(1) + '%' : 'N/A'}<br>
+                        pH: ${node.ph ? node.ph.toFixed(2) : 'N/A'}<br>
+                        TDS: ${node.tds ? node.tds.toFixed(0) + ' ppm' : 'N/A'}
+                    `;
+                    
+                    // Get marker icon based on status
+                    const markerIcon = getMarkerIcon(node.status);
                     
                     if (!markers[node.node_id]) {
-                        // Create a new marker
-                        markers[node.node_id] = new google.maps.Marker({
-                            position: position,
-                            map: map,
-                            title: node.node_id
-                        });
-                        
-                        // Add click listener
-                        markers[node.node_id].addListener('click', () => {
-                            showNodeDetails(node.node_id);
-                        });
+                        // Create a new marker with appropriate icon
+                        markers[node.node_id] = L.marker([node.latitude, node.longitude], { icon: markerIcon })
+                            .addTo(map)
+                            .bindTooltip(tooltipContent, {
+                                direction: 'top',
+                                permanent: false,
+                                sticky: false,
+                                offset: [0, -40],
+                                opacity: 0.9,
+                                className: 'leaflet-tooltip'
+                            })
+                            .on('click', () => {
+                                showNodeDetails(node.node_id);
+                            });
                     } else {
-                        // Update existing marker
-                        markers[node.node_id].setPosition(position);
+                        // Update existing marker position, icon, and tooltip
+                        markers[node.node_id].setLatLng([node.latitude, node.longitude]);
+                        markers[node.node_id].setIcon(markerIcon);
+                        markers[node.node_id].setTooltipContent(tooltipContent);
                     }
                 }
             });
@@ -182,8 +270,7 @@
                 const card = document.createElement('div');
                 card.className = 'node-card';
                 
-                const statusClass = node.status === 'GOOD' ? 'status-good' : 
-                                   (node.status === 'WARNING' ? 'status-warning' : 'status-error');
+                const statusClass = getStatusClass(node.status);
                 
                 const lastUpdated = node.timestamp ? new Date(node.timestamp).toLocaleString() : 'No data';
                 
@@ -229,9 +316,13 @@
                 })
                 .catch(error => console.error('Error disabling dummy data:', error));
         }
+        
+        // Get status CSS class
+        function getStatusClass(status) {
+            if (!status) return '';
+            return status === 'GOOD' ? 'status-good' : 
+                  (status === 'WARNING' ? 'status-warning' : 'status-error');
+        }
     </script>
-    
-    <!-- Google Maps API -->
-    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initMap" async defer></script>
 </body>
 </html> 

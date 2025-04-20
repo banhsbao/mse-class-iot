@@ -86,6 +86,21 @@
 
 ---
 
+### 7. 🗺️ Xem tổng quan node trên bản đồ Leaflet
+
+**Title**: Xem tổng quan node trên bản đồ Leaflet  
+**As a** người dùng  
+**I want** xem tổng quan các node trên bản đồ sử dụng Leaflet  
+**So that** tôi có thể dễ dàng quan sát vị trí và thông tin nhanh của từng node
+
+**Acceptance Criteria**:
+- Tích hợp bản đồ Leaflet để hiển thị vị trí các node
+- Mỗi node được hiển thị bằng một marker trên bản đồ
+- Khi di chuột (hover) vào marker, hiển thị tooltip với thông tin chi tiết: `nodeId`, `status`, `temp`, `humidity`, `ph`, `tds`
+- Có thể phóng to/thu nhỏ và di chuyển bản đồ để xem các node khác
+
+---
+
 ## 📝 Ghi chú kỹ thuật:
 
 - **Backend**: Flask (Python)
