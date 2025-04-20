@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IoT Monitoring System</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        #map {
+            height: 400px;
+            width: 100%;
+            margin-bottom: 20px;
+        }
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .node-card {
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 15px;
+            background-color: #f9f9f9;
+        }
+        .node-title {
+            margin-top: 0;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        .controls {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f0f0f0;
+            border-radius: 5px;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .status-good {
+            color: green;
+        }
+        .status-warning {
+            color: orange;
+        }
+        .status-error {
+            color: red;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>IoT Monitoring System</h1>
+        
+        <div class="controls">
+            <button id="enableDummyData">Enable Dummy Data</button>
+            <button id="disableDummyData">Disable Dummy Data</button>
+            <span id="dummyDataStatus">Dummy Data: Off</span>
+        </div>
+        
+        <h2>Node Map</h2>
+        <div id="map"></div>
+        
+        <h2>Dashboard</h2>
+        <div id="dashboard" class="dashboard">
+            <!-- Dashboard cards will be added here -->
+            <div class="loading">Loading data...</div>
+        </div>
+    </div>
+
+    <script>
+        // Globals
+        let map;
+        let markers = {};
+        let dummyDataEnabled = false;
+        
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            // Setup event listeners
+            document.getElementById('enableDummyData').addEventListener('click', enableDummyData);
+            document.getElementById('disableDummyData').addEventListener('click', disableDummyData);
+            
+            // Load dashboard data immediately and then every 5 seconds
+            loadDashboardData();
+            setInterval(loadDashboardData, 5000);
+        });
+        
+        // Initialize Google Maps
+        function initMap() {
+            map = new google.maps.Map(document.getElementById('map'), {
+                center: { lat: 10.762622, lng: 106.660172 },
+                zoom: 12
+            });
+            
+            // Load node data for the map
+            loadNodeData();
+        }
+        
+        // Load node data for the map
+        function loadNodeData() {
+            fetch('/api/nodes')
+                .then(response => response.json())
+                .then(data => {
+                    updateMap(data);
+                })
+                .catch(error => console.error('Error loading node data:', error));
+        }
+        
+        // Update map with node data
+        function updateMap(nodes) {
+            nodes.forEach(node => {
+                if (node.latitude && node.longitude) {
+                    const position = { lat: node.latitude, lng: node.longitude };
+                    
+                    if (!markers[node.node_id]) {
+                        // Create a new marker
+                        markers[node.node_id] = new google.maps.Marker({
+                            position: position,
+                            map: map,
+                            title: node.node_id
+                        });
+                        
+                        // Add click listener
+                        markers[node.node_id].addListener('click', () => {
+                            showNodeDetails(node.node_id);
+                        });
+                    } else {
+                        // Update existing marker
+                        markers[node.node_id].setPosition(position);
+                    }
+                }
+            });
+        }
+        
+        // Load dashboard data
+        function loadDashboardData() {
+            fetch('/api/dashboard')
+                .then(response => response.json())
+                .then(data => {
+                    updateDashboard(data);
+                })
+                .catch(error => console.error('Error loading dashboard data:', error));
+        }
+        
+        // Update dashboard with node data
+        function updateDashboard(nodes) {
+            const dashboard = document.getElementById('dashboard');
+            dashboard.innerHTML = '';
+            
+            if (nodes.length === 0) {
+                dashboard.innerHTML = '<div class="no-data">No node data available</div>';
+                return;
+            }
+            
+            nodes.forEach(node => {
+                const card = document.createElement('div');
+                card.className = 'node-card';
+                
+                const statusClass = node.status === 'GOOD' ? 'status-good' : 
+                                   (node.status === 'WARNING' ? 'status-warning' : 'status-error');
+                
+                const lastUpdated = node.timestamp ? new Date(node.timestamp).toLocaleString() : 'No data';
+                
+                card.innerHTML = `
+                    <h3 class="node-title">${node.node_id} <span class="${statusClass}">(${node.status || 'Unknown'})</span></h3>
+                    <p><strong>Temperature:</strong> ${node.temp ? node.temp.toFixed(1) + '°C' : 'N/A'}</p>
+                    <p><strong>Humidity:</strong> ${node.humidity ? node.humidity.toFixed(1) + '%' : 'N/A'}</p>
+                    <p><strong>pH:</strong> ${node.ph ? node.ph.toFixed(2) : 'N/A'}</p>
+                    <p><strong>TDS:</strong> ${node.tds ? node.tds.toFixed(0) + ' ppm' : 'N/A'}</p>
+                    <p><strong>Last Updated:</strong> ${lastUpdated}</p>
+                    <button onclick="showNodeDetails('${node.node_id}')">View Details</button>
+                `;
+                
+                dashboard.appendChild(card);
+            });
+        }
+        
+        // Show detailed node information
+        function showNodeDetails(nodeId) {
+            window.location.href = `/node-details.html?id=${nodeId}`;
+        }
+        
+        // Enable dummy data generation
+        function enableDummyData() {
+            fetch('/api/dummy-data/enable', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data.status);
+                    document.getElementById('dummyDataStatus').textContent = 'Dummy Data: On';
+                    dummyDataEnabled = true;
+                })
+                .catch(error => console.error('Error enabling dummy data:', error));
+        }
+        
+        // Disable dummy data generation
+        function disableDummyData() {
+            fetch('/api/dummy-data/disable', { method: 'POST' })
+                .then(response => response.json())
+                .then(data => {
+                    console.log(data.status);
+                    document.getElementById('dummyDataStatus').textContent = 'Dummy Data: Off';
+                    dummyDataEnabled = false;
+                })
+                .catch(error => console.error('Error disabling dummy data:', error));
+        }
+    </script>
+    
+    <!-- Google Maps API -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=YOUR_API_KEY&callback=initMap" async defer></script>
+</body>
+</html> 
