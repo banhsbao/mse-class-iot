@@ -1,0 +1,54 @@
+Yêu cầu làm thêm các chức năng như sau
+- Tạo webhook với body như bên dưới để cập nhật dữ liệu trong DB
+[
+  {
+    "nodeId": "Node1",
+    "data": [
+      {
+        "timestamp": 1082201284,
+        "tds": 300,
+        "ph": 8,
+        "humidity": 10,
+        "temperature": 1
+      },
+      {
+        "timestamp": 1082201264,
+        "tds": 300,
+        "ph": 8,
+        "humidity": 10,
+        "temperature": 1
+      }
+    ]
+  },
+  {
+    "nodeId": "Node2",
+    "data": [
+      {
+        "timestamp": 1082201264,
+        "tds": 300,
+        "ph": 8,
+        "humidity": 10,
+        "temperature": 1
+      }
+    ]
+  }
+]
+Trả về: Data updated
+
+- Thêm nút bật tắt nhận dữ liệu từ webhook (có UI)
+- Thêm nút bật tắt gửi dữ email cho người dùng
+- Chỉnh sửa chức năng gửi dữ liệu lên gradio để kiểm tra chất lượng nước 
+Code example cho integrate 
+pip install gradio_client
+
+from gradio_client import Client
+
+client = Client("DatDang/water_quality_predict")
+result = client.predict(
+		tds=3,
+		ph=3,
+		humidity=3,
+		temperature=3,
+		api_name="/predict"
+)
+

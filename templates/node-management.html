@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Node Management - IoT Monitoring System</title>
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+          crossorigin=""/>
+    <!-- Leaflet JavaScript -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+            crossorigin=""></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+        }
+        .node-form {
+            max-width: 500px;
+            margin: 20px auto;
+            padding: 20px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"],
+        input[type="number"] {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 10px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button.delete {
+            background-color: #f44336;
+        }
+        button.delete:hover {
+            background-color: #da190b;
+        }
+        .node-list {
+            margin-top: 30px;
+        }
+        .node-item {
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            background-color: #fff;
+        }
+        .node-item h3 {
+            margin: 0 0 10px 0;
+        }
+        #map {
+            height: 300px;
+            width: 100%;
+            margin: 20px 0;
+        }
+        .success-message {
+            color: green;
+            background-color: #e8f5e9;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            display: none;
+        }
+        .error-message {
+            color: #f44336;
+            background-color: #ffebee;
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            display: none;
+        }
+        .nav-buttons {
+            margin-bottom: 20px;
+        }
+        .nav-buttons button {
+            background-color: #2196F3;
+        }
+        .nav-buttons button:hover {
+            background-color: #1976D2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav-buttons">
+            <button onclick="window.location.href='/'">Back to Dashboard</button>
+        </div>
+        
+        <h1>Node Management</h1>
+        
+        <div class="node-form">
+            <h2 id="formTitle">Create New Node</h2>
+            <div id="successMessage" class="success-message"></div>
+            <div id="errorMessage" class="error-message"></div>
+            
+            <form id="nodeForm">
+                <input type="hidden" id="editMode" value="create">
+                <div class="form-group">
+                    <label for="nodeId">Node ID:</label>
+                    <input type="text" id="nodeId" name="nodeId" required>
+                </div>
+                <div class="form-group">
+                    <label for="latitude">Latitude:</label>
+                    <input type="number" id="latitude" name="latitude" step="0.000001" required>
+                </div>
+                <div class="form-group">
+                    <label for="longitude">Longitude:</label>
+                    <input type="number" id="longitude" name="longitude" step="0.000001" required>
+                </div>
+                
+                <div id="map"></div>
+                
+                <button type="submit" id="submitBtn">Create Node</button>
+                <button type="button" onclick="resetForm()" style="background-color: #607D8B;">Reset</button>
+            </form>
+        </div>
+        
+        <div class="node-list" id="nodeList">
+            <!-- Nodes will be listed here -->
+        </div>
+    </div>
+
+    <script>
+        let map;
+        let marker;
+        let currentEditingNode = null;
+        
+        // Initialize the application
+        document.addEventListener('DOMContentLoaded', function() {
+            initMap();
+            loadNodes();
+            
+            // Form submission handler
+            document.getElementById('nodeForm').addEventListener('submit', function(e) {
+                e.preventDefault();
+                submitForm();
+            });
+        });
+        
+        // Initialize Leaflet Map
+        function initMap() {
+            // Create map centered at Ho Chi Minh City
+            map = L.map('map').setView([10.762622, 106.660172], 12);
+            
+            // Add OpenStreetMap tile layer
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            }).addTo(map);
+            
+            // Add click handler to map
+            map.on('click', function(e) {
+                const lat = e.latlng.lat;
+                const lng = e.latlng.lng;
+                
+                document.getElementById('latitude').value = lat.toFixed(6);
+                document.getElementById('longitude').value = lng.toFixed(6);
+                
+                if (marker) {
+                    marker.setLatLng([lat, lng]);
+                } else {
+                    marker = L.marker([lat, lng]).addTo(map);
+                }
+            });
+        }
+        
+        // Load all nodes
+        function loadNodes() {
+            fetch('/api/nodes')
+                .then(response => response.json())
+                .then(nodes => {
+                    const nodeList = document.getElementById('nodeList');
+                    nodeList.innerHTML = '<h2>Existing Nodes</h2>';
+                    
+                    nodes.forEach(node => {
+                        const nodeElement = document.createElement('div');
+                        nodeElement.className = 'node-item';
+                        nodeElement.innerHTML = `
+                            <h3>${node.node_id}</h3>
+                            <p>Latitude: ${node.latitude}</p>
+                            <p>Longitude: ${node.longitude}</p>
+                            <button onclick="editNode('${node.node_id}', ${node.latitude}, ${node.longitude})">Edit</button>
+                            <button class="delete" onclick="deleteNode('${node.node_id}')">Delete</button>
+                        `;
+                        nodeList.appendChild(nodeElement);
+                    });
+                })
+                .catch(error => {
+                    showError('Error loading nodes: ' + error.message);
+                });
+        }
+        
+        // Submit form handler
+        function submitForm() {
+            const nodeId = document.getElementById('nodeId').value;
+            const latitude = parseFloat(document.getElementById('latitude').value);
+            const longitude = parseFloat(document.getElementById('longitude').value);
+            const editMode = document.getElementById('editMode').value;
+            
+            const data = {
+                node_id: nodeId,
+                latitude: latitude,
+                longitude: longitude
+            };
+            
+            const method = editMode === 'edit' ? 'PUT' : 'POST';
+            const url = editMode === 'edit' ? `/api/nodes/${nodeId}` : '/api/nodes';
+            
+            fetch(url, {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(data)
+            })
+            .then(response => response.json())
+            .then(data => {
+                showSuccess(editMode === 'edit' ? 'Node updated successfully' : 'Node created successfully');
+                loadNodes();
+                if (editMode === 'create') {
+                    resetForm();
+                }
+            })
+            .catch(error => {
+                showError('Error: ' + error.message);
+            });
+        }
+        
+        // Edit node
+        function editNode(nodeId, lat, lng) {
+            currentEditingNode = nodeId;
+            document.getElementById('editMode').value = 'edit';
+            document.getElementById('nodeId').value = nodeId;
+            document.getElementById('nodeId').readOnly = true;
+            document.getElementById('latitude').value = lat;
+            document.getElementById('longitude').value = lng;
+            document.getElementById('formTitle').textContent = 'Edit Node';
+            document.getElementById('submitBtn').textContent = 'Update Node';
+            
+            // Update map marker
+            if (marker) {
+                marker.setLatLng([lat, lng]);
+            } else {
+                marker = L.marker([lat, lng]).addTo(map);
+            }
+            map.setView([lat, lng], 12);
+        }
+        
+        // Delete node
+        function deleteNode(nodeId) {
+            if (confirm('Are you sure you want to delete this node?')) {
+                fetch(`/api/nodes/${nodeId}`, {
+                    method: 'DELETE'
+                })
+                .then(response => response.json())
+                .then(data => {
+                    showSuccess('Node deleted successfully');
+                    loadNodes();
+                    if (currentEditingNode === nodeId) {
+                        resetForm();
+                    }
+                })
+                .catch(error => {
+                    showError('Error deleting node: ' + error.message);
+                });
+            }
+        }
+        
+        // Reset form
+        function resetForm() {
+            document.getElementById('nodeForm').reset();
+            document.getElementById('editMode').value = 'create';
+            document.getElementById('nodeId').readOnly = false;
+            document.getElementById('formTitle').textContent = 'Create New Node';
+            document.getElementById('submitBtn').textContent = 'Create Node';
+            currentEditingNode = null;
+            
+            if (marker) {
+                map.removeLayer(marker);
+                marker = null;
+            }
+        }
+        
+        // Show success message
+        function showSuccess(message) {
+            const successElement = document.getElementById('successMessage');
+            successElement.textContent = message;
+            successElement.style.display = 'block';
+            setTimeout(() => {
+                successElement.style.display = 'none';
+            }, 3000);
+        }
+        
+        // Show error message
+        function showError(message) {
+            const errorElement = document.getElementById('errorMessage');
+            errorElement.textContent = message;
+            errorElement.style.display = 'block';
+            setTimeout(() => {
+                errorElement.style.display = 'none';
+            }, 3000);
+        }
+    </script>
+</body>
+</html> 

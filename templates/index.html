@@ -105,6 +105,15 @@
             <button id="disableDummyData">Disable Dummy Data</button>
             <span id="dummyDataStatus">Dummy Data: Off</span>
             <button onclick="window.location.href='/email-settings'" style="margin-left: 20px; background-color: #2196F3;">Email Notification Settings</button>
+            <button onclick="window.location.href='/node-management'" style="margin-left: 20px; background-color: #9C27B0;">Node Management</button>
+            
+            <div style="margin-top: 15px;">
+                <button id="toggleWebhook" style="background-color: #9C27B0;">Enable Webhook</button>
+                <span id="webhookStatus">Webhook: On</span>
+                
+                <button id="toggleEmail" style="background-color: #FF5722; margin-left: 20px;">Enable Email</button>
+                <span id="emailStatus">Email: On</span>
+            </div>
         </div>
         
         <h2>Node Map</h2>
@@ -122,15 +131,22 @@
         let map;
         let markers = {};
         let dummyDataEnabled = false;
+        let webhookEnabled = true;
+        let emailEnabled = true;
         
         // Initialize the application
         document.addEventListener('DOMContentLoaded', function() {
             // Setup event listeners
             document.getElementById('enableDummyData').addEventListener('click', enableDummyData);
             document.getElementById('disableDummyData').addEventListener('click', disableDummyData);
+            document.getElementById('toggleWebhook').addEventListener('click', toggleWebhook);
+            document.getElementById('toggleEmail').addEventListener('click', toggleEmail);
             
             // Initialize map
             initMap();
+            
+            // Load settings status
+            loadSettingsStatus();
             
             // Load dashboard data immediately and then every 5 seconds
             loadDashboardData();
@@ -322,6 +338,70 @@
             if (!status) return '';
             return status === 'GOOD' ? 'status-good' : 
                   (status === 'WARNING' ? 'status-warning' : 'status-error');
+        }
+
+        // Load settings status
+        function loadSettingsStatus() {
+            fetch('/api/settings/status')
+                .then(response => response.json())
+                .then(data => {
+                    updateSettingsUI(data);
+                })
+                .catch(error => console.error('Error loading settings:', error));
+        }
+
+        // Update settings UI
+        function updateSettingsUI(settings) {
+            webhookEnabled = settings.webhook_enabled;
+            emailEnabled = settings.email_enabled;
+            dummyDataEnabled = settings.dummy_data_enabled;
+
+            // Update webhook button and status
+            const webhookBtn = document.getElementById('toggleWebhook');
+            const webhookStatus = document.getElementById('webhookStatus');
+            webhookBtn.textContent = webhookEnabled ? 'Disable Webhook' : 'Enable Webhook';
+            webhookStatus.textContent = `Webhook: ${webhookEnabled ? 'On' : 'Off'}`;
+
+            // Update email button and status
+            const emailBtn = document.getElementById('toggleEmail');
+            const emailStatus = document.getElementById('emailStatus');
+            emailBtn.textContent = emailEnabled ? 'Disable Email' : 'Enable Email';
+            emailStatus.textContent = `Email: ${emailEnabled ? 'On' : 'Off'}`;
+
+            // Update dummy data status
+            document.getElementById('dummyDataStatus').textContent = `Dummy Data: ${dummyDataEnabled ? 'On' : 'Off'}`;
+        }
+
+        // Toggle webhook
+        function toggleWebhook() {
+            fetch('/api/webhook/toggle', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ enabled: !webhookEnabled })
+            })
+            .then(response => response.json())
+            .then(data => {
+                loadSettingsStatus();
+            })
+            .catch(error => console.error('Error toggling webhook:', error));
+        }
+
+        // Toggle email
+        function toggleEmail() {
+            fetch('/api/email/toggle', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ enabled: !emailEnabled })
+            })
+            .then(response => response.json())
+            .then(data => {
+                loadSettingsStatus();
+            })
+            .catch(error => console.error('Error toggling email:', error));
         }
     </script>
 </body>

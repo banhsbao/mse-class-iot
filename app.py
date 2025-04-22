@@ -7,18 +7,58 @@ import json
 from datetime import datetime
 import os
 import requests
+from gradio_client import Client
 
 app = Flask(__name__)
 
 # Configuration
 DATABASE = os.environ.get('DATABASE', 'iot.db')
 DUMMY_DATA_ENABLED = False
+WEBHOOK_ENABLED = True  # New config for webhook
+EMAIL_ENABLED = True    # New config for email notifications
 
 # Mailgun configuration
 MAILGUN_API_KEY = os.environ.get('MAILGUN_API_KEY', '')
 MAILGUN_DOMAIN = os.environ.get('MAILGUN_DOMAIN', '')
 MAILGUN_SENDER = os.environ.get('MAILGUN_SENDER', '')
 EMAIL_RATE_LIMIT = 60  # seconds
+
+# Gradio client
+try:
+    GRADIO_CLIENT = Client("https://datdang-water-quality-predict.hf.space")
+except Exception as e:
+    print(f"Warning: Could not initialize Gradio client: {e}")
+    GRADIO_CLIENT = None
+
+def predict_water_quality(tds, ph, humidity, temperature):
+    try:
+        if GRADIO_CLIENT is None:
+            # Fallback logic if Gradio client is not available
+            if tds > 1000 or ph < 6.5 or ph > 8.5:
+                return 'BAD'
+            elif tds > 500 or ph < 7.0 or ph > 8.0:
+                return 'WARNING'
+            else:
+                return 'GOOD'
+                
+        # Try to get prediction from Gradio
+        prediction = GRADIO_CLIENT.predict(
+            tds,
+            ph,
+            humidity,
+            temperature,
+            api_name="/predict"
+        )
+        return prediction
+    except Exception as e:
+        print(f"Error predicting water quality: {e}")
+        # Fallback to basic logic
+        if tds > 1000 or ph < 6.5 or ph > 8.5:
+            return 'BAD'
+        elif tds > 500 or ph < 7.0 or ph > 8.0:
+            return 'WARNING'
+        else:
+            return 'GOOD'
 
 # Database initialization
 def init_db():
@@ -59,7 +99,6 @@ def init_db():
     )
     ''')
     
-    # Insert some demo nodes if they don't exist
     for i in range(1, 21):
         node_id = f"node_{i}"
         c.execute("INSERT OR IGNORE INTO nodes (node_id, latitude, longitude, last_updated) VALUES (?, ?, ?, ?)",
@@ -175,49 +214,37 @@ def send_email_notification(node_id, status):
     conn.commit()
     conn.close()
 
-# Function to generate dummy data
 def generate_dummy_data():
     while DUMMY_DATA_ENABLED:
         conn = sqlite3.connect(DATABASE)
         c = conn.cursor()
         
-        # Get all nodes
         c.execute("SELECT node_id FROM nodes")
         nodes = c.fetchall()
         
-        # Generate data for each node
         for node in nodes:
             node_id = node[0]
             tds = random.uniform(100, 500)
             ph = random.uniform(6.0, 8.5)
             humidity = random.uniform(30, 90)
-            temp = random.uniform(20, 35)
-            
-            # Randomly set status
+            temp = random.uniform(20, 35)            
             status = random.choices(['GOOD', 'WARNING', 'BAD'], [0.7, 0.2, 0.1])[0]
             
-            # Insert data
             c.execute('''
             INSERT INTO sensor_data (node_id, tds, ph, humidity, temp, status, timestamp)
             VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (node_id, tds, ph, humidity, temp, status, datetime.now()))
-            
-            # Check if status is BAD, and send notification
-            if status == 'BAD':
-                send_email_notification(node_id, status)
         
         conn.commit()
         conn.close()
         time.sleep(1)
     print("Dummy data generation stopped")
 
-# Check status of nodes periodically
 def check_node_status():
     while True:
         conn = sqlite3.connect(DATABASE)
         c = conn.cursor()
         
-        # Find nodes without status
         c.execute('''
         SELECT DISTINCT s.node_id 
         FROM sensor_data s 
@@ -407,13 +434,193 @@ def node_details():
 def email_settings():
     return render_template('email-settings.html')
 
+@app.route('/api/webhook/data', methods=['POST'])
+def webhook_data():
+    if not WEBHOOK_ENABLED:
+        return jsonify({"error": "Webhook is disabled"}), 403
+        
+    data = request.json
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+        
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    
+    try:
+        for node in data:
+            node_id = node.get('nodeId')
+            node_data = node.get('data', [])
+            
+            for measurement in node_data:
+                # Check if node exists
+                c.execute('SELECT node_id FROM nodes WHERE node_id = ?', (node_id,))
+                if not c.fetchone():
+                    # Add new node with random coordinates near Ho Chi Minh City
+                    lat = 10.0 + random.random()
+                    lon = 106.0 + random.random()
+                    c.execute('''
+                    INSERT INTO nodes (node_id, latitude, longitude, last_updated)
+                    VALUES (?, ?, ?, ?)
+                    ''', (node_id, lat, lon, datetime.now()))
+                
+                # Get water quality prediction
+                prediction = predict_water_quality(
+                    measurement.get('tds', 0),
+                    measurement.get('ph', 0),
+                    measurement.get('humidity', 0),
+                    measurement.get('temperature', 0)
+                )
+                
+                # Insert sensor data with prediction as status
+                c.execute('''
+                INSERT INTO sensor_data 
+                (node_id, tds, ph, humidity, temp, status, timestamp)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ''', (
+                    node_id,
+                    measurement.get('tds'),
+                    measurement.get('ph'),
+                    measurement.get('humidity'),
+                    measurement.get('temperature'),
+                    prediction,
+                    datetime.fromtimestamp(measurement.get('timestamp'))
+                ))
+                
+                # Send email notification if status is BAD and email is enabled
+                if prediction == 'BAD' and EMAIL_ENABLED:
+                    send_email_notification(node_id, prediction)
+        
+        conn.commit()
+        return jsonify({"message": "Data updated"})
+        
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+@app.route('/api/webhook/toggle', methods=['POST'])
+def toggle_webhook():
+    global WEBHOOK_ENABLED
+    data = request.json
+    if 'enabled' in data:
+        WEBHOOK_ENABLED = data['enabled']
+        return jsonify({"webhook_enabled": WEBHOOK_ENABLED})
+    return jsonify({"error": "Missing enabled parameter"}), 400
+
+@app.route('/api/email/toggle', methods=['POST'])
+def toggle_email():
+    global EMAIL_ENABLED
+    data = request.json
+    if 'enabled' in data:
+        EMAIL_ENABLED = data['enabled']
+        return jsonify({"email_enabled": EMAIL_ENABLED})
+    return jsonify({"error": "Missing enabled parameter"}), 400
+
+@app.route('/api/settings/status', methods=['GET'])
+def get_settings_status():
+    return jsonify({
+        "webhook_enabled": WEBHOOK_ENABLED,
+        "email_enabled": EMAIL_ENABLED,
+        "dummy_data_enabled": DUMMY_DATA_ENABLED
+    })
+
+@app.route('/api/nodes/<node_id>', methods=['PUT'])
+def update_node(node_id):
+    data = request.json
+    if not data:
+        return jsonify({"error": "No data provided"}), 400
+        
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    
+    try:
+        # Check if node exists
+        c.execute('SELECT node_id FROM nodes WHERE node_id = ?', (node_id,))
+        if not c.fetchone():
+            return jsonify({"error": "Node not found"}), 404
+            
+        # Update node information
+        c.execute('''
+        UPDATE nodes 
+        SET latitude = ?, longitude = ?, last_updated = ?
+        WHERE node_id = ?
+        ''', (data.get('latitude'), data.get('longitude'), datetime.now(), node_id))
+        
+        conn.commit()
+        return jsonify({"message": "Node updated successfully"})
+        
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+@app.route('/api/nodes', methods=['POST'])
+def create_node():
+    data = request.json
+    if not data or 'node_id' not in data:
+        return jsonify({"error": "Node ID is required"}), 400
+        
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    
+    try:
+        # Check if node already exists
+        c.execute('SELECT node_id FROM nodes WHERE node_id = ?', (data['node_id'],))
+        if c.fetchone():
+            return jsonify({"error": "Node ID already exists"}), 409
+            
+        # Create new node
+        c.execute('''
+        INSERT INTO nodes (node_id, latitude, longitude, last_updated)
+        VALUES (?, ?, ?, ?)
+        ''', (
+            data['node_id'],
+            data.get('latitude', 10.0 + random.random()),  # Default to random location near HCMC
+            data.get('longitude', 106.0 + random.random()),
+            datetime.now()
+        ))
+        
+        conn.commit()
+        return jsonify({"message": "Node created successfully"}), 201
+        
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+@app.route('/api/nodes/<node_id>', methods=['DELETE'])
+def delete_node(node_id):
+    conn = sqlite3.connect(DATABASE)
+    c = conn.cursor()
+    
+    try:
+        # Check if node exists
+        c.execute('SELECT node_id FROM nodes WHERE node_id = ?', (node_id,))
+        if not c.fetchone():
+            return jsonify({"error": "Node not found"}), 404
+            
+        # Delete node and its sensor data
+        c.execute('DELETE FROM sensor_data WHERE node_id = ?', (node_id,))
+        c.execute('DELETE FROM nodes WHERE node_id = ?', (node_id,))
+        
+        conn.commit()
+        return jsonify({"message": "Node deleted successfully"})
+        
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"error": str(e)}), 500
+    finally:
+        conn.close()
+
+@app.route('/node-management')
+def node_management():
+    return render_template('node-management.html')
+
 if __name__ == '__main__':
-    # Initialize database
-    init_db()
-    
-    # Start background thread for status checking
+    init_db()    
     status_thread = threading.Thread(target=check_node_status, daemon=True)
-    status_thread.start()
-    
-    # Run Flask app
+    status_thread.start() 
     app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=True) 
